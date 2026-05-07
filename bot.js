@@ -95,7 +95,7 @@ bot.command('start', async (ctx) => {
             .eq('id', roomId);
 
         await ctx.reply(
-            `🎮 Вы присоединились!\nСтавка: ${room.bet_amount} TON\nВыберите жест в мини-приложении:`,
+            `🎮 Вы присоединились!\n\nСтавка: ${room.bet_amount} TON\n\nИгра началась! Используйте команду /game, чтобы выбрать жест.`,
             {
                 reply_markup: {
                     inline_keyboard: [
@@ -107,7 +107,7 @@ bot.command('start', async (ctx) => {
 
         await bot.api.sendMessage(
             room.creator_id,
-            `🎮 Соперник присоединился! Выберите жест в мини-приложении:`,
+            `🎮 Соперник присоединился!\n\nИспользуйте команду /game, чтобы выбрать жест.`,
             {
                 reply_markup: {
                     inline_keyboard: [
@@ -143,7 +143,7 @@ bot.command('start', async (ctx) => {
                 current_skin: 'Обычная Ехидна'
             }]);
             await ctx.reply(
-                `🦔 Привет, ${firstName}!\nАккаунт создан.\nНажми на кнопку, чтобы войти в игру.`,
+                `🦔 Привет, ${firstName}!\n\nАккаунт создан.\n\nНажми на кнопку, чтобы войти в игру.`,
                 {
                     reply_markup: {
                         inline_keyboard: [
@@ -154,7 +154,7 @@ bot.command('start', async (ctx) => {
             );
         } else {
             await ctx.reply(
-                `🦔 С возвращением, ${firstName}!\nНажми на кнопку, чтобы продолжить.`,
+                `🦔 С возвращением, ${firstName}!\n\nНажми на кнопку, чтобы продолжить.`,
                 {
                     reply_markup: {
                         inline_keyboard: [
@@ -204,15 +204,131 @@ bot.command('create_room', async (ctx) => {
     }
 
     await ctx.reply(
-        `✅ Комната создана!\nСтавка: ${bet} TON\nСсылка для соперника:\nhttps://t.me/EkhidnaNaklzBot?start=${roomId}`
+        `✅ Комната создана!\n\nСтавка: ${bet} TON\n\nСсылка для соперника:\nhttps://t.me/EkhidnaNaklzBot?start=${roomId}`
     );
 });
 
-// === ВРЕМЕННЫЙ ТЕСТОВЫЙ ОБРАБОТЧИК (ПРОСТОЕ ЭХО) ===
+// === ТЕСТОВЫЙ ОБРАБОТЧИК mini-app (ПРОСТОЕ ЭХО) ===
 bot.on('message:web_app_data', async (ctx) => {
     const data = ctx.webAppData.data;
     console.log(`📩 Тест: получено ${data} от ${ctx.from.id}`);
     await ctx.reply(`✅ Бот получил: ${data}`);
+});
+
+// === ИГРА ЧЕРЕЗ КНОПКИ В ЧАТЕ (ГАРАНТИРОВАННО РАБОТАЕТ) ===
+bot.command('game', async (ctx) => {
+    const userId = ctx.from.id.toString();
+    
+    const { data: room, error } = await supabase
+        .from('rooms')
+        .select('*')
+        .or(`creator_id.eq.${userId},opponent_id.eq.${userId}`)
+        .eq('status', 'playing')
+        .single();
+    
+    if (error || !room) {
+        await ctx.reply('❌ Нет активной игры. Создайте комнату через /create_room');
+        return;
+    }
+    
+    await ctx.reply('🎮 Выберите свой жест:', {
+        reply_markup: {
+            inline_keyboard: [
+                [
+                    { text: '🪨 КАМЕНЬ', callback_data: `game_${room.id}_rock` },
+                    { text: '📄 БУМАГА', callback_data: `game_${room.id}_paper` },
+                    { text: '✂️ НОЖНИЦЫ', callback_data: `game_${room.id}_scissors` }
+                ]
+            ]
+        }
+    });
+});
+
+// === ОБРАБОТКА НАЖАТИЯ НА КНОПКУ ===
+bot.callbackQuery(/^game_(.+)_(rock|paper|scissors)$/, async (ctx) => {
+    const roomId = ctx.match[1];
+    const choice = ctx.match[2];
+    const userId = ctx.from.id.toString();
+    
+    await ctx.answerCallbackQuery();
+    
+    const { data: room, error } = await supabase
+        .from('rooms')
+        .select('*')
+        .eq('id', roomId)
+        .single();
+    
+    if (error || !room || room.status !== 'playing') {
+        await ctx.reply('❌ Игра уже завершена.');
+        return;
+    }
+    
+    const isCreator = (room.creator_id === userId);
+    const updateField = isCreator ? 'creator_choice' : 'opponent_choice';
+    
+    await supabase
+        .from('rooms')
+        .update({ [updateField]: choice })
+        .eq('id', room.id);
+    
+    const { data: updatedRoom } = await supabase
+        .from('rooms')
+        .select('*')
+        .eq('id', room.id)
+        .single();
+    
+    if (updatedRoom.creator_choice && updatedRoom.opponent_choice) {
+        const p1 = updatedRoom.creator_choice;
+        const p2 = updatedRoom.opponent_choice;
+        let result = '';
+        let winnerId = '';
+        
+        if (p1 === p2) {
+            result = 'Ничья!';
+        } else if (
+            (p1 === 'rock' && p2 === 'scissors') ||
+            (p1 === 'scissors' && p2 === 'paper') ||
+            (p1 === 'paper' && p2 === 'rock')
+        ) {
+            result = `🥇 Победил СОЗДАТЕЛЬ комнаты! (${p1} vs ${p2})`;
+            winnerId = updatedRoom.creator_id;
+        } else {
+            result = `🥇 Победил СОПЕРНИК! (${p2} vs ${p1})`;
+            winnerId = updatedRoom.opponent_id;
+        }
+        
+        await supabase
+            .from('rooms')
+            .update({ status: 'finished', winner_id: winnerId })
+            .eq('id', room.id);
+        
+        if (winnerId) {
+            const loserId = winnerId === updatedRoom.creator_id ? updatedRoom.opponent_id : updatedRoom.creator_id;
+            
+            await supabase
+                .from('users')
+                .update({ wins: supabase.raw('wins + 1'), xp: supabase.raw('xp + 50') })
+                .eq('id', winnerId);
+            
+            await supabase
+                .from('users')
+                .update({ losses: supabase.raw('losses + 1'), xp: supabase.raw('xp + 10') })
+                .eq('id', loserId);
+            
+            await supabase
+                .from('users')
+                .update({ rank_level: supabase.raw('LEAST(6, 1 + FLOOR(xp / 100))') })
+                .in('id', [winnerId, loserId]);
+        }
+        
+        await ctx.editMessageText(`🏆 ${result}`, { reply_markup: undefined });
+        await bot.api.sendMessage(updatedRoom.creator_id, `🏆 ${result}`);
+        if (updatedRoom.opponent_id) {
+            await bot.api.sendMessage(updatedRoom.opponent_id, `🏆 ${result}`);
+        }
+    } else {
+        await ctx.editMessageText(`✅ Вы выбрали: ${choice}. Ожидаем выбора соперника...`);
+    }
 });
 
 // === ВЕБ-СЕРВЕР ДЛЯ RENDER ===
