@@ -68,6 +68,8 @@ bot.command('start', async (ctx) => {
         const roomId = payload;
         const userId = ctx.from.id.toString();
 
+        console.log(`🔗 Присоединение к комнате ${roomId} от пользователя ${userId}`);
+
         const { data: room, error } = await supabase
             .from('rooms')
             .select('*')
@@ -75,12 +77,15 @@ bot.command('start', async (ctx) => {
             .single();
 
         if (error || !room) {
+            console.error('Ошибка поиска комнаты:', error);
             await ctx.reply('❌ Комната не найдена.');
             return;
         }
-        
+
+        console.log(`Статус комнаты: ${room.status}, создатель: ${room.creator_id}, соперник: ${room.opponent_id || 'нет'}`);
+
         if (room.status !== 'waiting') {
-            await ctx.reply('❌ Комната уже занята.');
+            await ctx.reply('❌ Комната уже занята или игра началась.');
             return;
         }
 
@@ -89,13 +94,24 @@ bot.command('start', async (ctx) => {
             return;
         }
 
-        await supabase
+        const { error: updateError } = await supabase
             .from('rooms')
-            .update({ opponent_id: userId, status: 'playing' })
+            .update({ 
+                opponent_id: userId, 
+                status: 'playing' 
+            })
             .eq('id', roomId);
 
+        if (updateError) {
+            console.error('Ошибка обновления комнаты:', updateError);
+            await ctx.reply('❌ Не удалось присоединиться. Попробуйте позже.');
+            return;
+        }
+
+        console.log(`✅ Комната ${roomId} обновлена: статус playing, соперник ${userId}`);
+
         await ctx.reply(
-            `🎮 Вы присоединились!\n\nСтавка: ${room.bet_amount} TON\n\nИгра началась! Используйте команду /game, чтобы выбрать жест.`,
+            `🎮 Вы присоединились к комнате!\n\nСтавка: ${room.bet_amount} TON\n\nИгра началась! Используйте команду /game, чтобы выбрать жест.`,
             {
                 reply_markup: {
                     inline_keyboard: [
@@ -208,14 +224,42 @@ bot.command('create_room', async (ctx) => {
     );
 });
 
-// === ТЕСТОВЫЙ ОБРАБОТЧИК mini-app (ПРОСТОЕ ЭХО) ===
+// === ДИАГНОСТИЧЕСКАЯ КОМАНДА /check ===
+bot.command('check', async (ctx) => {
+    const userId = ctx.from.id.toString();
+    
+    const { data: rooms, error } = await supabase
+        .from('rooms')
+        .select('*')
+        .or(`creator_id.eq.${userId},opponent_id.eq.${userId}`)
+        .order('created_at', { ascending: false });
+    
+    if (error || !rooms || rooms.length === 0) {
+        await ctx.reply('❌ Нет комнат для вашего аккаунта.');
+        return;
+    }
+    
+    let message = '📋 Ваши комнаты:\n\n';
+    for (const room of rooms) {
+        message += `ID: ${room.id}\n`;
+        message += `Статус: ${room.status}\n`;
+        message += `Создатель: ${room.creator_id === userId ? 'вы' : room.creator_id}\n`;
+        message += `Соперник: ${room.opponent_id === userId ? 'вы' : (room.opponent_id || 'нет')}\n`;
+        message += `Ваш выбор: ${room.creator_id === userId ? (room.creator_choice || 'нет') : (room.opponent_choice || 'нет')}\n`;
+        message += `---\n`;
+    }
+    
+    await ctx.reply(message);
+});
+
+// === ТЕСТОВЫЙ ОБРАБОТЧИК mini-app ===
 bot.on('message:web_app_data', async (ctx) => {
     const data = ctx.webAppData.data;
     console.log(`📩 Тест: получено ${data} от ${ctx.from.id}`);
     await ctx.reply(`✅ Бот получил: ${data}`);
 });
 
-// === ИГРА ЧЕРЕЗ КНОПКИ В ЧАТЕ (ГАРАНТИРОВАННО РАБОТАЕТ) ===
+// === ИГРА ЧЕРЕЗ КНОПКИ В ЧАТЕ ===
 bot.command('game', async (ctx) => {
     const userId = ctx.from.id.toString();
     
@@ -322,9 +366,9 @@ bot.callbackQuery(/^game_(.+)_(rock|paper|scissors)$/, async (ctx) => {
         }
         
         await ctx.editMessageText(`🏆 ${result}`, { reply_markup: undefined });
-        await bot.api.sendMessage(updatedRoom.creator_id, `🏆 ${result}`);
+        await bot.api.sendMessage(updatedRoom.creator_id, `🏆 Игра завершена! ${result}`);
         if (updatedRoom.opponent_id) {
-            await bot.api.sendMessage(updatedRoom.opponent_id, `🏆 ${result}`);
+            await bot.api.sendMessage(updatedRoom.opponent_id, `🏆 Игра завершена! ${result}`);
         }
     } else {
         await ctx.editMessageText(`✅ Вы выбрали: ${choice}. Ожидаем выбора соперника...`);
