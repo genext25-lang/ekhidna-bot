@@ -61,6 +61,69 @@ async function showProfile(ctx) {
 
 // === КОМАНДА /start ===
 bot.command('start', async (ctx) => {
+    const payload = ctx.match; // текст после /start
+
+    // --- ПРИСОЕДИНЕНИЕ К КОМНАТЕ ---
+    if (payload && payload.startsWith('room_')) {
+        const roomId = payload;
+        const userId = ctx.from.id.toString();
+
+        const { data: room, error } = await supabase
+            .from('rooms')
+            .select('*')
+            .eq('id', roomId)
+            .single();
+
+        if (error || !room) {
+            await ctx.reply('❌ Комната не найдена.');
+            return;
+        }
+        
+        if (room.status !== 'waiting') {
+            await ctx.reply('❌ Комната уже занята или игра началась.');
+            return;
+        }
+
+        if (room.creator_id === userId) {
+            await ctx.reply('❌ Нельзя присоединиться к своей комнате.');
+            return;
+        }
+
+        // Обновляем комнату
+        await supabase
+            .from('rooms')
+            .update({
+                opponent_id: userId,
+                status: 'playing'
+            })
+            .eq('id', roomId);
+
+        await ctx.reply(
+            `🎮 Вы присоединились к комнате!\n\nСтавка: ${room.bet_amount} TON\nИгра началась!\n\nВыберите жест в мини-приложении:`,
+            {
+                reply_markup: {
+                    inline_keyboard: [
+                        [{ text: '🎮 ИГРАТЬ', web_app: { url: 'https://reliable-kringle-83dc61.netlify.app/' } }]
+                    ]
+                }
+            }
+        );
+
+        await bot.api.sendMessage(
+            room.creator_id,
+            `🎮 Соперник присоединился!\n\nВыберите жест в мини-приложении:`,
+            {
+                reply_markup: {
+                    inline_keyboard: [
+                        [{ text: '🎮 ИГРАТЬ', web_app: { url: 'https://reliable-kringle-83dc61.netlify.app/' } }]
+                    ]
+                }
+            }
+        );
+        return;
+    }
+
+    // --- ОБЫЧНАЯ РЕГИСТРАЦИЯ /start ---
     const user = ctx.from;
     const userId = user.id.toString();
     const username = user.username || 'без_имени';
@@ -246,11 +309,6 @@ app.get('/', (req, res) => {
 app.listen(port, '0.0.0.0', () => {
     console.log(`✅ Веб-сервер на порту ${port}`);
 });
-
-// === СБРОС WEBHOOK ПРИ ЗАПУСКЕ ===
-bot.api.deleteWebhook({ drop_pending_updates: true })
-    .then(() => console.log('✅ Webhook сброшен'))
-    .catch(err => console.error('❌ Ошибка сброса webhook:', err));
 
 // === ЗАПУСК БОТА ===
 console.log('🦔 Бот Ехидны Наклз запускается...');
