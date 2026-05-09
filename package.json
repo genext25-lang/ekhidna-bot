@@ -7,9 +7,9 @@
     "start": "node bot.js"
   },
   "dependencies": {
-    "grammy": "^1.32.0",
-    "@supabase/supabase-js": "^2.49.1",
+    "@supabase/supabase-js": "^2.105.4",
+    "dotenv": "^16.4.7",
     "express": "^4.21.2",
-    "dotenv": "^16.4.7"
+    "grammy": "^1.32.0"
   }
 }
