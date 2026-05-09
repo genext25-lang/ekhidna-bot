@@ -317,6 +317,10 @@ app.get('/', (req, res) => {
 
 app.post('/webhook', async (req, res) => {
     try {
+        // Инициализируем бота, если ещё не инициализирован
+        if (!bot.botInfo) {
+            await bot.init();
+        }
         await bot.handleUpdate(req.body);
         res.sendStatus(200);
     } catch (err) {
@@ -325,14 +329,26 @@ app.post('/webhook', async (req, res) => {
     }
 });
 
-// Установка webhook
-const WEBHOOK_URL = `https://ekhidna-game-v1-0.onrender.com/webhook`;
-bot.api.deleteWebhook({ drop_pending_updates: true })
-    .then(() => bot.api.setWebhook(WEBHOOK_URL))
-    .then(() => console.log(`✅ Webhook установлен на ${WEBHOOK_URL}`))
-    .catch(err => console.error('❌ Ошибка webhook:', err));
+// === ИНИЦИАЛИЗАЦИЯ И ЗАПУСК ===
+async function start() {
+    // Инициализируем бота перед установкой webhook
+    await bot.init();
+    console.log(`🤖 Бот ${bot.botInfo.username} инициализирован`);
+    
+    // Устанавливаем webhook
+    const WEBHOOK_URL = `https://ekhidna-game-v1-0.onrender.com/webhook`;
+    await bot.api.deleteWebhook({ drop_pending_updates: true });
+    await bot.api.setWebhook(WEBHOOK_URL);
+    console.log(`✅ Webhook установлен на ${WEBHOOK_URL}`);
+    
+    // Запускаем сервер
+    app.listen(port, '0.0.0.0', () => {
+        console.log(`✅ Веб-сервер на порту ${port}`);
+        console.log(`🦔 Бот ${bot.botInfo.username} готов принимать обновления`);
+    });
+}
 
-app.listen(port, '0.0.0.0', () => {
-    console.log(`✅ Веб-сервер на порту ${port}`);
-    console.log(`🦔 Бот готов принимать обновления через webhook`);
+start().catch(err => {
+    console.error('❌ Критическая ошибка при запуске:', err);
+    process.exit(1);
 });
