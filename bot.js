@@ -82,8 +82,6 @@ bot.command('start', async (ctx) => {
             return;
         }
 
-        console.log(`Статус комнаты: ${room.status}, создатель: ${room.creator_id}, соперник: ${room.opponent_id || 'нет'}`);
-
         if (room.status !== 'waiting') {
             await ctx.reply('❌ Комната уже занята или игра началась.');
             return;
@@ -108,30 +106,8 @@ bot.command('start', async (ctx) => {
             return;
         }
 
-        console.log(`✅ Комната ${roomId} обновлена: статус playing, соперник ${userId}`);
-
-        await ctx.reply(
-            `🎮 Вы присоединились к комнате!\n\nСтавка: ${room.bet_amount} TON\n\nИгра началась! Используйте команду /game, чтобы выбрать жест.`,
-            {
-                reply_markup: {
-                    inline_keyboard: [
-                        [{ text: '🎮 ИГРАТЬ', web_app: { url: 'https://reliable-kringle-83dc61.netlify.app/' } }]
-                    ]
-                }
-            }
-        );
-
-        await bot.api.sendMessage(
-            room.creator_id,
-            `🎮 Соперник присоединился!\n\nИспользуйте команду /game, чтобы выбрать жест.`,
-            {
-                reply_markup: {
-                    inline_keyboard: [
-                        [{ text: '🎮 ИГРАТЬ', web_app: { url: 'https://reliable-kringle-83dc61.netlify.app/' } }]
-                    ]
-                }
-            }
-        );
+        await ctx.reply(`🎮 Вы присоединились к комнате!\nСтавка: ${room.bet_amount} TON\nИгра началась! Используйте команду /game, чтобы выбрать жест.`);
+        await bot.api.sendMessage(room.creator_id, `🎮 Соперник присоединился! Используйте команду /game, чтобы выбрать жест.`);
         return;
     }
 
@@ -158,27 +134,21 @@ bot.command('start', async (ctx) => {
                 losses: 0,
                 current_skin: 'Обычная Ехидна'
             }]);
-            await ctx.reply(
-                `🦔 Привет, ${firstName}!\n\nАккаунт создан.\n\nНажми на кнопку, чтобы войти в игру.`,
-                {
-                    reply_markup: {
-                        inline_keyboard: [
-                            [{ text: '🎮 ИГРАТЬ', web_app: { url: 'https://reliable-kringle-83dc61.netlify.app/' } }]
-                        ]
-                    }
+            await ctx.reply(`🦔 Привет, ${firstName}!\nАккаунт создан.\nНажми на кнопку, чтобы войти в игру.`, {
+                reply_markup: {
+                    inline_keyboard: [
+                        [{ text: '🎮 ИГРАТЬ', web_app: { url: 'https://reliable-kringle-83dc61.netlify.app/' } }]
+                    ]
                 }
-            );
+            });
         } else {
-            await ctx.reply(
-                `🦔 С возвращением, ${firstName}!\n\nНажми на кнопку, чтобы продолжить.`,
-                {
-                    reply_markup: {
-                        inline_keyboard: [
-                            [{ text: '🎮 ИГРАТЬ', web_app: { url: 'https://reliable-kringle-83dc61.netlify.app/' } }]
-                        ]
-                    }
+            await ctx.reply(`🦔 С возвращением, ${firstName}!\nНажми на кнопку, чтобы продолжить.`, {
+                reply_markup: {
+                    inline_keyboard: [
+                        [{ text: '🎮 ИГРАТЬ', web_app: { url: 'https://reliable-kringle-83dc61.netlify.app/' } }]
+                    ]
                 }
-            );
+            });
         }
     } catch (err) {
         console.error('Ошибка в /start:', err);
@@ -219,37 +189,7 @@ bot.command('create_room', async (ctx) => {
         return;
     }
 
-    await ctx.reply(
-        `✅ Комната создана!\n\nСтавка: ${bet} TON\n\nСсылка для соперника:\nhttps://t.me/EkhidnaNaklzBot?start=${roomId}`
-    );
-});
-
-// === КОМАНДА /check ===
-bot.command('check', async (ctx) => {
-    const userId = ctx.from.id.toString();
-    
-    const { data: rooms, error } = await supabase
-        .from('rooms')
-        .select('*')
-        .or(`creator_id.eq.${userId},opponent_id.eq.${userId}`)
-        .order('created_at', { ascending: false });
-    
-    if (error || !rooms || rooms.length === 0) {
-        await ctx.reply('❌ Нет комнат для вашего аккаунта.');
-        return;
-    }
-    
-    let message = '📋 Ваши комнаты:\n\n';
-    for (const room of rooms) {
-        message += `ID: ${room.id}\n`;
-        message += `Статус: ${room.status}\n`;
-        message += `Создатель: ${room.creator_id === userId ? 'вы' : room.creator_id}\n`;
-        message += `Соперник: ${room.opponent_id === userId ? 'вы' : (room.opponent_id || 'нет')}\n`;
-        message += `Ваш выбор: ${room.creator_id === userId ? (room.creator_choice || 'нет') : (room.opponent_choice || 'нет')}\n`;
-        message += `---\n`;
-    }
-    
-    await ctx.reply(message);
+    await ctx.reply(`✅ Комната создана!\nСтавка: ${bet} TON\nСсылка для соперника:\nhttps://t.me/EkhidnaNaklzBot?start=${roomId}`);
 });
 
 // === КОМАНДА /game ===
@@ -281,7 +221,7 @@ bot.command('game', async (ctx) => {
     });
 });
 
-// === ОБРАБОТКА НАЖАТИЯ НА КНОПКУ ===
+// === ОБРАБОТКА ВЫБОРА ЖЕСТА ===
 bot.callbackQuery(/^game_(.+)_(rock|paper|scissors)$/, async (ctx) => {
     const roomId = ctx.match[1];
     const choice = ctx.match[2];
@@ -341,17 +281,14 @@ bot.callbackQuery(/^game_(.+)_(rock|paper|scissors)$/, async (ctx) => {
         
         if (winnerId) {
             const loserId = winnerId === updatedRoom.creator_id ? updatedRoom.opponent_id : updatedRoom.creator_id;
-            
             await supabase
                 .from('users')
                 .update({ wins: supabase.raw('wins + 1'), xp: supabase.raw('xp + 50') })
                 .eq('id', winnerId);
-            
             await supabase
                 .from('users')
                 .update({ losses: supabase.raw('losses + 1'), xp: supabase.raw('xp + 10') })
                 .eq('id', loserId);
-            
             await supabase
                 .from('users')
                 .update({ rank_level: supabase.raw('LEAST(6, 1 + FLOOR(xp / 100))') })
@@ -359,7 +296,6 @@ bot.callbackQuery(/^game_(.+)_(rock|paper|scissors)$/, async (ctx) => {
         }
         
         await ctx.editMessageText(`🏆 ${result}`, { reply_markup: undefined });
-        await ctx.reply(`🏆 ${result}`);
         await bot.api.sendMessage(updatedRoom.creator_id, `🏆 Игра завершена! ${result}`);
         if (updatedRoom.opponent_id) {
             await bot.api.sendMessage(updatedRoom.opponent_id, `🏆 Игра завершена! ${result}`);
@@ -369,21 +305,17 @@ bot.callbackQuery(/^game_(.+)_(rock|paper|scissors)$/, async (ctx) => {
     }
 });
 
-// === ВЕБ-СЕРВЕР ДЛЯ WEBHOOK ===
+// === ВЕБ-СЕРВЕР И WEBHOOK ===
 const app = express();
 const port = process.env.PORT || 10000;
 
-// Middleware для парсинга JSON и URL-encoded данных
 app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
 
-// Простой эндпоинт для проверки работы сервера
 app.get('/', (req, res) => {
     res.send('🦔 Бот Ехидны Наклз работает через webhook');
 });
 
-// ** ИСПРАВЛЕННЫЙ ЭНДПОИНТ ДЛЯ WEBHOOK **
-app.post(`/webhook`, async (req, res) => {
+app.post('/webhook', async (req, res) => {
     try {
         await bot.handleUpdate(req.body);
         res.sendStatus(200);
@@ -393,23 +325,14 @@ app.post(`/webhook`, async (req, res) => {
     }
 });
 
-// === НАСТРОЙКА WEBHOOK ===
-const WEBHOOK_URL = `https://ekhidna-bot.onrender.com/webhook`;
-
-// Сначала сбрасываем старый webhook, затем устанавливаем новый
+// Установка webhook
+const WEBHOOK_URL = `https://ekhidna-game-v1-0.onrender.com/webhook`;
 bot.api.deleteWebhook({ drop_pending_updates: true })
-    .then(() => {
-        console.log('✅ Старый webhook сброшен');
-        return bot.api.setWebhook(WEBHOOK_URL);
-    })
-    .then(() => {
-        console.log(`✅ Webhook успешно установлен на: ${WEBHOOK_URL}`);
-    })
-    .catch((err) => {
-        console.error('❌ Ошибка установки webhook:', err);
-    });
+    .then(() => bot.api.setWebhook(WEBHOOK_URL))
+    .then(() => console.log(`✅ Webhook установлен на ${WEBHOOK_URL}`))
+    .catch(err => console.error('❌ Ошибка webhook:', err));
 
-// === ЗАПУСК СЕРВЕРА ===
 app.listen(port, '0.0.0.0', () => {
-    console.log(`✅ Веб-сервер запущен на порту ${port}`);
+    console.log(`✅ Веб-сервер на порту ${port}`);
+    console.log(`🦔 Бот готов принимать обновления через webhook`);
 });
