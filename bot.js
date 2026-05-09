@@ -238,24 +238,49 @@ bot.command('check', async (ctx) => {
     await ctx.reply(message);
 });
 
-// === КОМАНДА /game ===
+// === КОМАНДА /game (ИСПРАВЛЕННАЯ) ===
 bot.command('game', async (ctx) => {
     const userId = ctx.from.id.toString();
     
-    const { data: room, error } = await supabase
+    console.log(`🔍 Ищем активную комнату для игрока ${userId}`);
+    
+    // Ищем комнату, где игрок является создателем или соперником, и статус = playing
+    const { data: rooms, error } = await supabase
         .from('rooms')
         .select('*')
         .or(`creator_id.eq.${userId},opponent_id.eq.${userId}`)
-        .eq('status', 'playing')
-        .single();
+        .eq('status', 'playing');
     
-    if (error || !room) {
-        await ctx.reply('❌ Нет активной игры. Создайте комнату через /create_room');
+    if (error) {
+        console.error('Ошибка поиска комнаты:', error);
+        await ctx.reply('❌ Ошибка при поиске комнаты.');
         return;
     }
     
-    // Сохраняем ID комнаты в сессии (временное решение)
-    await ctx.reply('🎮 Выберите свой жест:', {
+    if (!rooms || rooms.length === 0) {
+        // Для диагностики покажем все комнаты игрока
+        const { data: allRooms } = await supabase
+            .from('rooms')
+            .select('id, status, creator_id, opponent_id')
+            .or(`creator_id.eq.${userId},opponent_id.eq.${userId}`);
+        
+        if (allRooms && allRooms.length > 0) {
+            let msg = '📋 Найдены комнаты:\n';
+            for (const r of allRooms) {
+                msg += `ID: ${r.id.substring(0, 20)}..., статус: ${r.status}\n`;
+            }
+            await ctx.reply(`❌ Нет комнат со статусом 'playing'.\n\n${msg}`);
+        } else {
+            await ctx.reply('❌ Нет активной игры. Создайте комнату через /create_room');
+        }
+        return;
+    }
+    
+    // Берём первую подходящую комнату
+    const room = rooms[0];
+    console.log(`✅ Найдена комната ${room.id}, статус: ${room.status}`);
+    
+    await ctx.reply(`🎮 Выберите свой жест:`, {
         reply_markup: {
             inline_keyboard: [
                 [
