@@ -210,7 +210,7 @@ bot.command('create_room', async (ctx) => {
     );
 });
 
-// === ДИАГНОСТИЧЕСКАЯ КОМАНДА /check ===
+// === КОМАНДА /check ===
 bot.command('check', async (ctx) => {
     const userId = ctx.from.id.toString();
     
@@ -238,46 +238,23 @@ bot.command('check', async (ctx) => {
     await ctx.reply(message);
 });
 
-// === ДИАГНОСТИЧЕСКАЯ ВЕРСИЯ /game ===
+// === КОМАНДА /game ===
 bot.command('game', async (ctx) => {
     const userId = ctx.from.id.toString();
     
-    // Ищем комнату с этим игроком и статусом playing
-    const { data: rooms, error } = await supabase
+    const { data: room, error } = await supabase
         .from('rooms')
         .select('*')
         .or(`creator_id.eq.${userId},opponent_id.eq.${userId}`)
-        .eq('status', 'playing');
+        .eq('status', 'playing')
+        .single();
     
-    if (error) {
-        await ctx.reply(`❌ Ошибка БД: ${error.message}`);
+    if (error || !room) {
+        await ctx.reply('❌ Нет активной игры. Создайте комнату через /create_room');
         return;
     }
     
-    if (!rooms || rooms.length === 0) {
-        // Показываем, какие комнаты есть (с любым статусом)
-        const { data: allRooms } = await supabase
-            .from('rooms')
-            .select('id, status, creator_id, opponent_id')
-            .or(`creator_id.eq.${userId},opponent_id.eq.${userId}`);
-        
-        if (allRooms && allRooms.length > 0) {
-            let msg = '📋 Найдены комнаты (статус не playing):\n';
-            for (const r of allRooms) {
-                msg += `ID: ${r.id}, статус: ${r.status}\n`;
-            }
-            await ctx.reply(msg);
-        } else {
-            await ctx.reply('❌ Нет активной игры. Создайте комнату через /create_room');
-        }
-        return;
-    }
-    
-    // Если нашли комнату со статусом playing
-    const room = rooms[0];
-    await ctx.reply(`✅ Найдена активная комната: ${room.id}\nСтатус: ${room.status}\nСоздатель: ${room.creator_id}\nСоперник: ${room.opponent_id || 'нет'}`);
-    
-    // Показываем кнопки для выбора жеста
+    // Сохраняем ID комнаты в сессии (временное решение)
     await ctx.reply('🎮 Выберите свой жест:', {
         reply_markup: {
             inline_keyboard: [
@@ -299,6 +276,7 @@ bot.callbackQuery(/^game_(.+)_(rock|paper|scissors)$/, async (ctx) => {
     
     await ctx.answerCallbackQuery();
     
+    // Получаем комнату
     const { data: room, error } = await supabase
         .from('rooms')
         .select('*')
@@ -306,49 +284,56 @@ bot.callbackQuery(/^game_(.+)_(rock|paper|scissors)$/, async (ctx) => {
         .single();
     
     if (error || !room || room.status !== 'playing') {
-        await ctx.reply('❌ Игра уже завершена.');
+        await ctx.reply('❌ Игра уже завершена или комната не найдена.');
         return;
     }
     
     const isCreator = (room.creator_id === userId);
     const updateField = isCreator ? 'creator_choice' : 'opponent_choice';
     
+    // Сохраняем выбор
     await supabase
         .from('rooms')
         .update({ [updateField]: choice })
         .eq('id', room.id);
     
+    // Проверяем, оба ли сделали выбор
     const { data: updatedRoom } = await supabase
         .from('rooms')
         .select('*')
         .eq('id', room.id)
         .single();
     
+    const choiceNames = { rock: '🪨 КАМЕНЬ', paper: '📄 БУМАГА', scissors: '✂️ НОЖНИЦЫ' };
+    
     if (updatedRoom.creator_choice && updatedRoom.opponent_choice) {
+        // ОБА ВЫБРАЛИ — ОПРЕДЕЛЯЕМ ПОБЕДИТЕЛЯ
         const p1 = updatedRoom.creator_choice;
         const p2 = updatedRoom.opponent_choice;
         let result = '';
         let winnerId = '';
         
         if (p1 === p2) {
-            result = 'Ничья!';
+            result = `🤝 НИЧЬЯ! Оба выбрали ${choiceNames[p1]}`;
         } else if (
             (p1 === 'rock' && p2 === 'scissors') ||
             (p1 === 'scissors' && p2 === 'paper') ||
             (p1 === 'paper' && p2 === 'rock')
         ) {
-            result = `🥇 Победил СОЗДАТЕЛЬ комнаты! (${p1} vs ${p2})`;
+            result = `🥇 ПОБЕДИЛ СОЗДАТЕЛЬ КОМНАТЫ!\n${choiceNames[p1]} побеждает ${choiceNames[p2]}`;
             winnerId = updatedRoom.creator_id;
         } else {
-            result = `🥇 Победил СОПЕРНИК! (${p2} vs ${p1})`;
+            result = `🥇 ПОБЕДИЛ СОПЕРНИК!\n${choiceNames[p2]} побеждает ${choiceNames[p1]}`;
             winnerId = updatedRoom.opponent_id;
         }
         
+        // Обновляем комнату
         await supabase
             .from('rooms')
             .update({ status: 'finished', winner_id: winnerId })
             .eq('id', room.id);
         
+        // Обновляем статистику игроков
         if (winnerId) {
             const loserId = winnerId === updatedRoom.creator_id ? updatedRoom.opponent_id : updatedRoom.creator_id;
             await supabase
@@ -365,13 +350,28 @@ bot.callbackQuery(/^game_(.+)_(rock|paper|scissors)$/, async (ctx) => {
                 .in('id', [winnerId, loserId]);
         }
         
-        await ctx.editMessageText(`🏆 ${result}`, { reply_markup: undefined });
-        await bot.api.sendMessage(updatedRoom.creator_id, `🏆 ${result}`);
+        // Отправляем результат в чат обоим игрокам
+        await bot.api.sendMessage(updatedRoom.creator_id, `🏆 ИГРА ЗАВЕРШЕНА!\n\n${result}`);
         if (updatedRoom.opponent_id) {
-            await bot.api.sendMessage(updatedRoom.opponent_id, `🏆 ${result}`);
+            await bot.api.sendMessage(updatedRoom.opponent_id, `🏆 ИГРА ЗАВЕРШЕНА!\n\n${result}`);
+        }
+        
+        // Обновляем сообщение с кнопками
+        try {
+            await ctx.editMessageText(`🏆 ${result}`, { reply_markup: undefined });
+        } catch (e) {
+            // Если не удалось обновить — ничего страшного
         }
     } else {
-        await ctx.editMessageText(`✅ Вы выбрали: ${choice}. Ожидаем выбора соперника...`);
+        // ТОЛЬКО ОДИН ВЫБРАЛ — ждём второго
+        const who = isCreator ? 'Создатель комнаты' : 'Соперник';
+        const waitingFor = isCreator ? 'соперника' : 'создателя комнаты';
+        const choiceText = choiceNames[choice];
+        
+        await ctx.editMessageText(
+            `✅ ${who} выбрал ${choiceText}\n\n⏳ Ожидаем выбора ${waitingFor}...`,
+            { reply_markup: undefined }
+        );
     }
 });
 
