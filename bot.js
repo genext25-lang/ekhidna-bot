@@ -82,6 +82,8 @@ bot.command('start', async (ctx) => {
             return;
         }
 
+        console.log(`Статус комнаты: ${room.status}, создатель: ${room.creator_id}, соперник: ${room.opponent_id || 'нет'}`);
+
         if (room.status !== 'waiting') {
             await ctx.reply('❌ Комната уже занята или игра началась.');
             return;
@@ -106,8 +108,16 @@ bot.command('start', async (ctx) => {
             return;
         }
 
-        await ctx.reply(`🎮 Вы присоединились к комнате!\nСтавка: ${room.bet_amount} TON\nИгра началась! Используйте команду /game, чтобы выбрать жест.`);
-        await bot.api.sendMessage(room.creator_id, `🎮 Соперник присоединился! Используйте команду /game, чтобы выбрать жест.`);
+        console.log(`✅ Комната ${roomId} обновлена: статус playing, соперник ${userId}`);
+
+        await ctx.reply(
+            `🎮 Вы присоединились к комнате!\n\nСтавка: ${room.bet_amount} TON\n\nИгра началась! Используйте команду /game, чтобы выбрать жест.`
+        );
+
+        await bot.api.sendMessage(
+            room.creator_id,
+            `🎮 Соперник присоединился!\n\nИспользуйте команду /game, чтобы выбрать жест.`
+        );
         return;
     }
 
@@ -134,21 +144,27 @@ bot.command('start', async (ctx) => {
                 losses: 0,
                 current_skin: 'Обычная Ехидна'
             }]);
-            await ctx.reply(`🦔 Привет, ${firstName}!\nАккаунт создан.\nНажми на кнопку, чтобы войти в игру.`, {
-                reply_markup: {
-                    inline_keyboard: [
-                        [{ text: '🎮 ИГРАТЬ', web_app: { url: 'https://reliable-kringle-83dc61.netlify.app/' } }]
-                    ]
+            await ctx.reply(
+                `🦔 Привет, ${firstName}!\n\nАккаунт создан.\n\nНажми на кнопку, чтобы войти в игру.`,
+                {
+                    reply_markup: {
+                        inline_keyboard: [
+                            [{ text: '🎮 ИГРАТЬ', web_app: { url: 'https://reliable-kringle-83dc61.netlify.app/' } }]
+                        ]
+                    }
                 }
-            });
+            );
         } else {
-            await ctx.reply(`🦔 С возвращением, ${firstName}!\nНажми на кнопку, чтобы продолжить.`, {
-                reply_markup: {
-                    inline_keyboard: [
-                        [{ text: '🎮 ИГРАТЬ', web_app: { url: 'https://reliable-kringle-83dc61.netlify.app/' } }]
-                    ]
+            await ctx.reply(
+                `🦔 С возвращением, ${firstName}!\n\nНажми на кнопку, чтобы продолжить.`,
+                {
+                    reply_markup: {
+                        inline_keyboard: [
+                            [{ text: '🎮 ИГРАТЬ', web_app: { url: 'https://reliable-kringle-83dc61.netlify.app/' } }]
+                        ]
+                    }
                 }
-            });
+            );
         }
     } catch (err) {
         console.error('Ошибка в /start:', err);
@@ -189,25 +205,79 @@ bot.command('create_room', async (ctx) => {
         return;
     }
 
-    await ctx.reply(`✅ Комната создана!\nСтавка: ${bet} TON\nСсылка для соперника:\nhttps://t.me/EkhidnaNaklzBot?start=${roomId}`);
+    await ctx.reply(
+        `✅ Комната создана!\n\nСтавка: ${bet} TON\n\nСсылка для соперника:\nhttps://t.me/EkhidnaNaklzBot?start=${roomId}`
+    );
 });
 
-// === КОМАНДА /game ===
-bot.command('game', async (ctx) => {
+// === ДИАГНОСТИЧЕСКАЯ КОМАНДА /check ===
+bot.command('check', async (ctx) => {
     const userId = ctx.from.id.toString();
     
-    const { data: room, error } = await supabase
+    const { data: rooms, error } = await supabase
         .from('rooms')
         .select('*')
         .or(`creator_id.eq.${userId},opponent_id.eq.${userId}`)
-        .eq('status', 'playing')
-        .single();
+        .order('created_at', { ascending: false });
     
-    if (error || !room) {
-        await ctx.reply('❌ Нет активной игры. Создайте комнату через /create_room');
+    if (error || !rooms || rooms.length === 0) {
+        await ctx.reply('❌ Нет комнат для вашего аккаунта.');
         return;
     }
     
+    let message = '📋 Ваши комнаты:\n\n';
+    for (const room of rooms) {
+        message += `ID: ${room.id}\n`;
+        message += `Статус: ${room.status}\n`;
+        message += `Создатель: ${room.creator_id === userId ? 'вы' : room.creator_id}\n`;
+        message += `Соперник: ${room.opponent_id === userId ? 'вы' : (room.opponent_id || 'нет')}\n`;
+        message += `Ваш выбор: ${room.creator_id === userId ? (room.creator_choice || 'нет') : (room.opponent_choice || 'нет')}\n`;
+        message += `---\n`;
+    }
+    
+    await ctx.reply(message);
+});
+
+// === ДИАГНОСТИЧЕСКАЯ ВЕРСИЯ /game ===
+bot.command('game', async (ctx) => {
+    const userId = ctx.from.id.toString();
+    
+    // Ищем комнату с этим игроком и статусом playing
+    const { data: rooms, error } = await supabase
+        .from('rooms')
+        .select('*')
+        .or(`creator_id.eq.${userId},opponent_id.eq.${userId}`)
+        .eq('status', 'playing');
+    
+    if (error) {
+        await ctx.reply(`❌ Ошибка БД: ${error.message}`);
+        return;
+    }
+    
+    if (!rooms || rooms.length === 0) {
+        // Показываем, какие комнаты есть (с любым статусом)
+        const { data: allRooms } = await supabase
+            .from('rooms')
+            .select('id, status, creator_id, opponent_id')
+            .or(`creator_id.eq.${userId},opponent_id.eq.${userId}`);
+        
+        if (allRooms && allRooms.length > 0) {
+            let msg = '📋 Найдены комнаты (статус не playing):\n';
+            for (const r of allRooms) {
+                msg += `ID: ${r.id}, статус: ${r.status}\n`;
+            }
+            await ctx.reply(msg);
+        } else {
+            await ctx.reply('❌ Нет активной игры. Создайте комнату через /create_room');
+        }
+        return;
+    }
+    
+    // Если нашли комнату со статусом playing
+    const room = rooms[0];
+    await ctx.reply(`✅ Найдена активная комната: ${room.id}\nСтатус: ${room.status}\nСоздатель: ${room.creator_id}\nСоперник: ${room.opponent_id || 'нет'}`);
+    
+    // Показываем кнопки для выбора жеста
     await ctx.reply('🎮 Выберите свой жест:', {
         reply_markup: {
             inline_keyboard: [
@@ -296,9 +366,9 @@ bot.callbackQuery(/^game_(.+)_(rock|paper|scissors)$/, async (ctx) => {
         }
         
         await ctx.editMessageText(`🏆 ${result}`, { reply_markup: undefined });
-        await bot.api.sendMessage(updatedRoom.creator_id, `🏆 Игра завершена! ${result}`);
+        await bot.api.sendMessage(updatedRoom.creator_id, `🏆 ${result}`);
         if (updatedRoom.opponent_id) {
-            await bot.api.sendMessage(updatedRoom.opponent_id, `🏆 Игра завершена! ${result}`);
+            await bot.api.sendMessage(updatedRoom.opponent_id, `🏆 ${result}`);
         }
     } else {
         await ctx.editMessageText(`✅ Вы выбрали: ${choice}. Ожидаем выбора соперника...`);
@@ -317,7 +387,6 @@ app.get('/', (req, res) => {
 
 app.post('/webhook', async (req, res) => {
     try {
-        // Инициализируем бота, если ещё не инициализирован
         if (!bot.botInfo) {
             await bot.init();
         }
@@ -331,17 +400,14 @@ app.post('/webhook', async (req, res) => {
 
 // === ИНИЦИАЛИЗАЦИЯ И ЗАПУСК ===
 async function start() {
-    // Инициализируем бота перед установкой webhook
     await bot.init();
     console.log(`🤖 Бот ${bot.botInfo.username} инициализирован`);
     
-    // Устанавливаем webhook
     const WEBHOOK_URL = `https://ekhidna-game-v1-0.onrender.com/webhook`;
     await bot.api.deleteWebhook({ drop_pending_updates: true });
     await bot.api.setWebhook(WEBHOOK_URL);
     console.log(`✅ Webhook установлен на ${WEBHOOK_URL}`);
     
-    // Запускаем сервер
     app.listen(port, '0.0.0.0', () => {
         console.log(`✅ Веб-сервер на порту ${port}`);
         console.log(`🦔 Бот ${bot.botInfo.username} готов принимать обновления`);
