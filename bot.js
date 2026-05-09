@@ -64,7 +64,6 @@ bot.api.setMyCommands([
     { command: 'start', description: '🏠 Начать игру' },
     { command: 'profile', description: '📊 Мой профиль' },
     { command: 'create_room', description: '🎮 Создать комнату' },
-    { command: 'game', description: '⚔️ Выбрать жест' },
     { command: 'check', description: '🔍 Мои комнаты' }
 ]).then(() => {
     console.log('✅ Меню бота обновлено');
@@ -93,8 +92,6 @@ bot.command('start', async (ctx) => {
             return;
         }
 
-        console.log(`Статус комнаты: ${room.status}, создатель: ${room.creator_id}, соперник: ${room.opponent_id || 'нет'}`);
-
         if (room.status !== 'waiting') {
             await ctx.reply('❌ Комната уже занята или игра началась.');
             return;
@@ -121,26 +118,26 @@ bot.command('start', async (ctx) => {
 
         console.log(`✅ Комната ${roomId} обновлена: статус playing, соперник ${userId}`);
 
-        // Отправляем сообщение с кнопкой присоединившемуся игроку
+        // Сообщение присоединившемуся игроку
         await ctx.reply(
-            `🎮 Вы присоединились к комнате!\n\nСтавка: ${room.bet_amount} TON\n\nИгра началась!`,
+            `🎮 Вы присоединились к комнате!\n\nСтавка: ${room.bet_amount} TON\n\nИгра началась! Нажмите на кнопку, чтобы открыть игру и выбрать жест.`,
             {
                 reply_markup: {
                     inline_keyboard: [
-                        [{ text: '⚔️ ВЫБРАТЬ ЖЕСТ', callback_data: `show_game_${roomId}` }]
+                        [{ text: '🎮 ИГРАТЬ', web_app: { url: 'https://reliable-kringle-83dc61.netlify.app/' } }]
                     ]
                 }
             }
         );
 
-        // Отправляем сообщение с кнопкой создателю комнаты
+        // Сообщение создателю комнаты
         await bot.api.sendMessage(
             room.creator_id,
-            `🎮 Соперник присоединился!\n\nИспользуйте кнопку, чтобы выбрать жест.`,
+            `🎮 Соперник присоединился!\n\nИгра началась! Нажмите на кнопку, чтобы открыть игру и выбрать жест.`,
             {
                 reply_markup: {
                     inline_keyboard: [
-                        [{ text: '⚔️ ВЫБРАТЬ ЖЕСТ', callback_data: `show_game_${roomId}` }]
+                        [{ text: '🎮 ИГРАТЬ', web_app: { url: 'https://reliable-kringle-83dc61.netlify.app/' } }]
                     ]
                 }
             }
@@ -237,7 +234,7 @@ bot.command('create_room', async (ctx) => {
     );
 });
 
-// === КОМАНДА /check (диагностика) ===
+// === КОМАНДА /check ===
 bot.command('check', async (ctx) => {
     const userId = ctx.from.id.toString();
     
@@ -264,95 +261,36 @@ bot.command('check', async (ctx) => {
     await ctx.reply(message);
 });
 
-// === КОМАНДА /game (оставлена для совместимости) ===
-bot.command('game', async (ctx) => {
+// === ОБРАБОТКА ВЫБОРА ЖЕСТА ИЗ МИНИ-ПРИЛОЖЕНИЯ ===
+bot.on('message:web_app_data', async (ctx) => {
+    const choice = ctx.webAppData.data;
     const userId = ctx.from.id.toString();
     
-    const { data: rooms, error } = await supabase
+    console.log(`📩 Выбор из мини-приложения от ${userId}: ${choice}`);
+    
+    // Ищем активную комнату
+    const { data: room, error } = await supabase
         .from('rooms')
         .select('*')
         .or(`creator_id.eq.${userId},opponent_id.eq.${userId}`)
-        .eq('status', 'playing');
-    
-    if (error || !rooms || rooms.length === 0) {
-        await ctx.reply('❌ Нет активной игры.');
-        return;
-    }
-    
-    const room = rooms[0];
-    await ctx.reply('🎮 Выберите свой жест:', {
-        reply_markup: {
-            inline_keyboard: [
-                [
-                    { text: '🪨 КАМЕНЬ', callback_data: `game_${room.id}_rock` },
-                    { text: '📄 БУМАГА', callback_data: `game_${room.id}_paper` },
-                    { text: '✂️ НОЖНИЦЫ', callback_data: `game_${room.id}_scissors` }
-                ]
-            ]
-        }
-    });
-});
-
-// === ОБРАБОТКА КНОПКИ "ВЫБРАТЬ ЖЕСТ" ===
-bot.callbackQuery(/^show_game_(.+)$/, async (ctx) => {
-    const roomId = ctx.match[1];
-    const userId = ctx.from.id.toString();
-    
-    await ctx.answerCallbackQuery();
-    
-    // Проверяем, активна ли комната
-    const { data: room, error } = await supabase
-        .from('rooms')
-        .select('*')
-        .eq('id', roomId)
+        .eq('status', 'playing')
         .single();
     
-    if (error || !room || room.status !== 'playing') {
-        await ctx.reply('❌ Игра уже завершена или комната не найдена.');
-        return;
-    }
-    
-    // Показываем кнопки с жестами
-    await ctx.reply('🎮 Выберите свой жест:', {
-        reply_markup: {
-            inline_keyboard: [
-                [
-                    { text: '🪨 КАМЕНЬ', callback_data: `game_${room.id}_rock` },
-                    { text: '📄 БУМАГА', callback_data: `game_${room.id}_paper` },
-                    { text: '✂️ НОЖНИЦЫ', callback_data: `game_${room.id}_scissors` }
-                ]
-            ]
-        }
-    });
-});
-
-// === ОБРАБОТКА ВЫБОРА ЖЕСТА ===
-bot.callbackQuery(/^game_(.+)_(rock|paper|scissors)$/, async (ctx) => {
-    const roomId = ctx.match[1];
-    const choice = ctx.match[2];
-    const userId = ctx.from.id.toString();
-    
-    await ctx.answerCallbackQuery();
-    
-    const { data: room, error } = await supabase
-        .from('rooms')
-        .select('*')
-        .eq('id', roomId)
-        .single();
-    
-    if (error || !room || room.status !== 'playing') {
-        await ctx.reply('❌ Игра уже завершена.');
+    if (error || !room) {
+        await ctx.reply('❌ Нет активной игры. Создайте комнату через /create_room');
         return;
     }
     
     const isCreator = (room.creator_id === userId);
     const updateField = isCreator ? 'creator_choice' : 'opponent_choice';
     
+    // Сохраняем выбор
     await supabase
         .from('rooms')
         .update({ [updateField]: choice })
         .eq('id', room.id);
     
+    // Проверяем, оба ли сделали выбор
     const { data: updatedRoom } = await supabase
         .from('rooms')
         .select('*')
@@ -378,15 +316,17 @@ bot.callbackQuery(/^game_(.+)_(rock|paper|scissors)$/, async (ctx) => {
             result = `🥇 ПОБЕДИЛ СОЗДАТЕЛЬ КОМНАТЫ!\n${choiceNames[p1]} побеждает ${choiceNames[p2]}`;
             winnerId = updatedRoom.creator_id;
         } else {
-            result = `🥇 ПОБЕДИЛ СОПЕРНИК!\n${choiceNames[p2]} побеждает ${choiceNames[p1]}`);
+            result = `🥇 ПОБЕДИЛ СОПЕРНИК!\n${choiceNames[p2]} побеждает ${choiceNames[p1]}`;
             winnerId = updatedRoom.opponent_id;
         }
         
+        // Обновляем комнату
         await supabase
             .from('rooms')
             .update({ status: 'finished', winner_id: winnerId })
             .eq('id', room.id);
         
+        // Обновляем статистику игроков
         if (winnerId) {
             const loserId = winnerId === updatedRoom.creator_id ? updatedRoom.opponent_id : updatedRoom.creator_id;
             
@@ -446,22 +386,14 @@ bot.callbackQuery(/^game_(.+)_(rock|paper|scissors)$/, async (ctx) => {
                 .eq('id', loserId);
         }
         
-        // Отправляем результат
+        // Отправляем результат в чат
+        await ctx.reply(`🏆 ИГРА ЗАВЕРШЕНА!\n\n${result}`);
         await bot.api.sendMessage(updatedRoom.creator_id, `🏆 ИГРА ЗАВЕРШЕНА!\n\n${result}`);
         if (updatedRoom.opponent_id) {
             await bot.api.sendMessage(updatedRoom.opponent_id, `🏆 ИГРА ЗАВЕРШЕНА!\n\n${result}`);
         }
-        
-        try {
-            await ctx.editMessageText(`🏆 ${result}`, { reply_markup: undefined });
-        } catch (e) {}
     } else {
-        const who = isCreator ? 'Создатель' : 'Соперник';
-        const waitingFor = isCreator ? 'соперника' : 'создателя';
-        await ctx.editMessageText(
-            `✅ ${who} выбрал ${choiceNames[choice]}\n\n⏳ Ожидаем выбора ${waitingFor}...`,
-            { reply_markup: undefined }
-        );
+        await ctx.reply(`✅ Ваш выбор (${choiceNames[choice]}) принят. Ожидаем выбора соперника...`);
     }
 });
 
