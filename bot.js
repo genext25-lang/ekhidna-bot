@@ -131,7 +131,7 @@ bot.command('profile', async (ctx) => {
     await showProfile(ctx);
 });
 
-// === КОМАНДА /create_room (оставлена для совместимости) ===
+// === КОМАНДА /create_room ===
 bot.command('create_room', async (ctx) => {
     const userId = ctx.from.id.toString();
     const args = ctx.message.text.split(' ');
@@ -193,72 +193,24 @@ bot.command('check', async (ctx) => {
 
 // === ОБРАБОТКА ДАННЫХ ИЗ МИНИ-ПРИЛОЖЕНИЯ ===
 bot.on('message:web_app_data', async (ctx) => {
+    // Диагностика
+    console.log('🔔 web_app_data получено, сырые данные:', ctx.webAppData.data);
+    
     let data;
     try {
         data = JSON.parse(ctx.webAppData.data);
+        console.log('📦 Распарсено:', data);
     } catch (e) {
-        console.error('Ошибка парсинга данных:', e);
+        console.error('❌ Ошибка парсинга JSON:', e);
+        await ctx.reply(JSON.stringify({ type: 'error', message: 'Неверный формат данных' }));
         return;
     }
     
     const userId = ctx.from.id.toString();
-    console.log(`📩 Получены данные от ${userId}:`, data);
     
-    // === ПОЛУЧЕНИЕ ИНФОРМАЦИИ О КОМНАТЕ ===
-    if (data.action === 'get_room') {
-        const startParam = data.start_param;
-        let room = null;
-        
-        if (startParam && startParam.startsWith('room_')) {
-            const { data: foundRoom } = await supabase
-                .from('rooms')
-                .select('*')
-                .eq('id', startParam)
-                .single();
-            room = foundRoom;
-            
-            if (room && room.status === 'waiting' && room.creator_id !== userId) {
-                await supabase
-                    .from('rooms')
-                    .update({ opponent_id: userId, status: 'playing' })
-                    .eq('id', room.id);
-                room.status = 'playing';
-                console.log(`✅ Игрок ${userId} присоединился к комнате ${room.id}`);
-            }
-        }
-        
-        if (!room) {
-            const { data: foundRoom } = await supabase
-                .from('rooms')
-                .select('*')
-                .or(`creator_id.eq.${userId},opponent_id.eq.${userId}`)
-                .eq('status', 'playing')
-                .single();
-            room = foundRoom;
-        }
-        
-        if (room) {
-            await ctx.reply(JSON.stringify({
-                type: 'room_info',
-                roomId: room.id,
-                betAmount: room.bet_amount,
-                status: room.status,
-                isCreator: room.creator_id === userId
-            }));
-        } else {
-            await ctx.reply(JSON.stringify({
-                type: 'room_info',
-                roomId: null,
-                betAmount: 0,
-                status: 'no_room'
-            }));
-        }
-        return;
-    }
-    
-    // === СОЗДАНИЕ КОМНАТЫ ИЗ МИНИ-ПРИЛОЖЕНИЯ ===
+    // === СОЗДАНИЕ КОМНАТЫ ===
     if (data.action === 'create_room') {
-        const userId = ctx.from.id.toString();
+        console.log(`🏠 Создание комнаты для пользователя ${userId}`);
         const bet = data.bet || 0.1;
         const roomId = `room_${Date.now()}_${userId}`;
         
@@ -272,11 +224,12 @@ bot.on('message:web_app_data', async (ctx) => {
             }]);
         
         if (error) {
-            console.error('Ошибка создания комнаты:', error);
-            await ctx.reply(JSON.stringify({ type: 'error', message: 'Не удалось создать комнату' }));
+            console.error('❌ Ошибка создания комнаты:', error);
+            await ctx.reply(JSON.stringify({ type: 'error', message: 'Не удалось создать комнату: ' + error.message }));
             return;
         }
         
+        console.log(`✅ Комната создана: ${roomId}`);
         await ctx.reply(JSON.stringify({
             type: 'room_created',
             roomId: roomId,
@@ -285,9 +238,9 @@ bot.on('message:web_app_data', async (ctx) => {
         return;
     }
     
-    // === ПРИСОЕДИНЕНИЕ К КОМНАТЕ ИЗ МИНИ-ПРИЛОЖЕНИЯ ===
+    // === ПРИСОЕДИНЕНИЕ К КОМНАТЕ ===
     if (data.action === 'join_room') {
-        const userId = ctx.from.id.toString();
+        console.log(`🔗 Присоединение к комнате ${data.roomId} от пользователя ${userId}`);
         const roomId = data.roomId;
         
         const { data: room, error } = await supabase
@@ -297,6 +250,7 @@ bot.on('message:web_app_data', async (ctx) => {
             .single();
         
         if (error || !room) {
+            console.error('❌ Комната не найдена:', error);
             await ctx.reply(JSON.stringify({ type: 'error', message: 'Комната не найдена' }));
             return;
         }
@@ -315,6 +269,8 @@ bot.on('message:web_app_data', async (ctx) => {
             .from('rooms')
             .update({ opponent_id: userId, status: 'playing' })
             .eq('id', room.id);
+        
+        console.log(`✅ Игрок ${userId} присоединился к комнате ${roomId}`);
         
         await ctx.reply(JSON.stringify({
             type: 'room_joined',
@@ -350,6 +306,8 @@ bot.on('message:web_app_data', async (ctx) => {
             return;
         }
         
+        console.log(`🎮 Выбор жеста от ${userId}: ${choice} в комнате ${roomId}`);
+        
         const { data: room, error } = await supabase
             .from('rooms')
             .select('*')
@@ -381,6 +339,8 @@ bot.on('message:web_app_data', async (ctx) => {
             .single();
         
         if (updatedRoom.creator_choice && updatedRoom.opponent_choice) {
+            console.log('🏆 Оба игрока сделали выбор, определяем победителя');
+            
             const result = determineWinner(
                 updatedRoom.creator_choice, 
                 updatedRoom.opponent_choice,
@@ -457,6 +417,49 @@ bot.on('message:web_app_data', async (ctx) => {
             if (updatedRoom.opponent_id) {
                 await bot.api.sendMessage(updatedRoom.opponent_id, `🏆 ${result.text}`);
             }
+        }
+        return;
+    }
+    
+    // === ПОЛУЧЕНИЕ ИНФОРМАЦИИ О КОМНАТЕ ===
+    if (data.action === 'get_room') {
+        const startParam = data.start_param;
+        let room = null;
+        
+        if (startParam && startParam.startsWith('room_')) {
+            const { data: foundRoom } = await supabase
+                .from('rooms')
+                .select('*')
+                .eq('id', startParam)
+                .single();
+            room = foundRoom;
+        }
+        
+        if (!room) {
+            const { data: foundRoom } = await supabase
+                .from('rooms')
+                .select('*')
+                .or(`creator_id.eq.${userId},opponent_id.eq.${userId}`)
+                .eq('status', 'playing')
+                .single();
+            room = foundRoom;
+        }
+        
+        if (room) {
+            await ctx.reply(JSON.stringify({
+                type: 'room_info',
+                roomId: room.id,
+                betAmount: room.bet_amount,
+                status: room.status,
+                isCreator: room.creator_id === userId
+            }));
+        } else {
+            await ctx.reply(JSON.stringify({
+                type: 'room_info',
+                roomId: null,
+                betAmount: 0,
+                status: 'no_room'
+            }));
         }
         return;
     }
