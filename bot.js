@@ -369,33 +369,19 @@ bot.callbackQuery(/^game_(.+)_(rock|paper|scissors)$/, async (ctx) => {
     }
 });
 
-// === ВЕБ-СЕРВЕР ДЛЯ RENDER ===
+// === ВЕБ-СЕРВЕР ДЛЯ WEBHOOK ===
 const app = express();
 const port = process.env.PORT || 10000;
 
-app.use(express.json()); // важно для webhook
+// Middleware для парсинга JSON (важно для webhook)
+app.use(express.json());
 
+// Эндпоинт для проверки работы сервера
 app.get('/', (req, res) => {
-    res.send('🦔 Бот Ехидны Наклз работает');
+    res.send('🦔 Бот Ехидны Наклз работает через webhook');
 });
 
-// === НАСТРОЙКА WEBHOOK ===
-const WEBHOOK_URL = `https://ekhidna-bot.onrender.com/webhook`;
-
-// Сброс и установка webhook
-bot.api.deleteWebhook({ drop_pending_updates: true })
-    .then(() => {
-        console.log('✅ Webhook сброшен');
-        return bot.api.setWebhook(WEBHOOK_URL);
-    })
-    .then(() => {
-        console.log(`✅ Webhook установлен на ${WEBHOOK_URL}`);
-    })
-    .catch(err => {
-        console.error('❌ Ошибка установки webhook:', err);
-    });
-
-// Эндпоинт для приёма webhook
+// Эндпоинт для получения обновлений от Telegram
 app.post('/webhook', async (req, res) => {
     try {
         await bot.handleUpdate(req.body);
@@ -406,9 +392,24 @@ app.post('/webhook', async (req, res) => {
     }
 });
 
+// === НАСТРОЙКА WEBHOOK ===
+const WEBHOOK_URL = `https://ekhidna-bot.onrender.com/webhook`;
+
+// Сначала сбрасываем старый webhook, затем устанавливаем новый
+bot.api.deleteWebhook({ drop_pending_updates: true })
+    .then(() => {
+        console.log('✅ Старый webhook сброшен');
+        return bot.api.setWebhook(WEBHOOK_URL);
+    })
+    .then(() => {
+        console.log(`✅ Webhook успешно установлен на: ${WEBHOOK_URL}`);
+    })
+    .catch((err) => {
+        console.error('❌ Ошибка установки webhook:', err);
+    });
+
 // === ЗАПУСК СЕРВЕРА ===
 app.listen(port, '0.0.0.0', () => {
-    console.log(`✅ Веб-сервер на порту ${port}`);
+    console.log(`✅ Веб-сервер запущен на порту ${port}`);
+    console.log(`🦔 Бот Ехидны Наклз готов принимать обновления через webhook`);
 });
-
-console.log('🦔 Бот Ехидны Наклз запускается через webhook...');
