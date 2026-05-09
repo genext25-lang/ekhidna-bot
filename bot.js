@@ -373,16 +373,17 @@ bot.callbackQuery(/^game_(.+)_(rock|paper|scissors)$/, async (ctx) => {
 const app = express();
 const port = process.env.PORT || 10000;
 
-// Middleware для парсинга JSON (важно для webhook)
+// Middleware для парсинга JSON и URL-encoded данных
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-// Эндпоинт для проверки работы сервера
+// Простой эндпоинт для проверки работы сервера
 app.get('/', (req, res) => {
     res.send('🦔 Бот Ехидны Наклз работает через webhook');
 });
 
-// Эндпоинт для получения обновлений от Telegram
-app.post('/webhook', async (req, res) => {
+// ** ИСПРАВЛЕННЫЙ ЭНДПОИНТ ДЛЯ WEBHOOK **
+app.post(`/webhook`, async (req, res) => {
     try {
         await bot.handleUpdate(req.body);
         res.sendStatus(200);
@@ -411,5 +412,4 @@ bot.api.deleteWebhook({ drop_pending_updates: true })
 // === ЗАПУСК СЕРВЕРА ===
 app.listen(port, '0.0.0.0', () => {
     console.log(`✅ Веб-сервер запущен на порту ${port}`);
-    console.log(`🦔 Бот Ехидны Наклз готов принимать обновления через webhook`);
 });
