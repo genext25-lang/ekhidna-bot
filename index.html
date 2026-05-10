@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>Ехидна Наклз — Мафиози</title>
+    <title>Ехидна Наклз — Дуэль</title>
     <style>
         * {
             margin: 0;
@@ -42,7 +42,18 @@
             background-clip: text;
             color: transparent;
         }
-        .sub { color: #aaa; font-size: 14px; margin: 8px 0 28px 0; }
+        .sub { color: #aaa; font-size: 14px; margin: 8px 0 20px 0; }
+
+        .status {
+            background: #111;
+            border-radius: 32px;
+            padding: 16px;
+            margin: 15px 0;
+            font-size: 16px;
+            color: #0f0;
+            font-weight: bold;
+            border: 1px solid #2a2a2a;
+        }
 
         .choice-buttons {
             display: flex;
@@ -54,7 +65,7 @@
             background: #222;
             border: 2px solid #444;
             border-radius: 60px;
-            padding: 12px 0;
+            padding: 14px 0;
             width: 100px;
             font-size: 18px;
             font-weight: bold;
@@ -63,35 +74,71 @@
             color: #eee;
         }
         .choice-btn:active { transform: scale(0.95); background: #2c2c2c; border-color: #ff5555; }
-        .rock { border-left-color: #aa6f20; }
-        .paper { border-left-color: #4a90e2; }
-        .scissors { border-left-color: #e24a4a; }
+        .choice-btn.disabled { opacity: 0.5; pointer-events: none; }
 
-        .status {
-            background: #111;
-            border-radius: 32px;
-            padding: 14px;
-            margin: 15px 0;
-            font-size: 14px;
-            color: #ccc;
-        }
-
-        .footer-buttons {
+        .room-actions {
             display: flex;
+            flex-direction: column;
             gap: 12px;
-            justify-content: center;
-            margin-top: 20px;
+            margin: 20px 0;
         }
-        .small-btn {
-            background: #1f1f2b;
-            border: none;
-            padding: 10px 18px;
+        .action-btn {
+            background: #1a1a2e;
+            border: 1px solid #ff4444;
             border-radius: 40px;
-            color: #ddd;
+            padding: 14px 20px;
+            font-size: 16px;
+            font-weight: bold;
             cursor: pointer;
+            color: #fff;
         }
-        .small-btn:active { background: #333; color: #fff; }
-        .info-text { margin-top: 24px; font-size: 11px; color: #5a5a6e; }
+        .action-btn:active { transform: scale(0.97); background: #2a2a3e; }
+        .action-btn.loading { opacity: 0.5; pointer-events: none; }
+
+        .invite-link {
+            background: #0a0a0a;
+            border-radius: 20px;
+            padding: 12px;
+            margin: 15px 0;
+            font-size: 12px;
+            color: #aaffaa;
+            word-break: break-all;
+            border: 1px solid #2a2a2a;
+        }
+
+        .room-info {
+            background: #1a1a1a;
+            border-radius: 20px;
+            padding: 12px;
+            margin-bottom: 20px;
+            font-size: 13px;
+            color: #aaa;
+        }
+
+        .result-area {
+            background: #0a0a0a;
+            border-radius: 32px;
+            padding: 20px;
+            margin-top: 20px;
+            border: 1px solid #ff4444;
+        }
+        .result-text {
+            font-size: 18px;
+            font-weight: bold;
+            color: #ffaa44;
+        }
+
+        .hidden { display: none; }
+        
+        input {
+            background: #222;
+            border: 1px solid #444;
+            border-radius: 40px;
+            padding: 12px;
+            color: #fff;
+            text-align: center;
+            font-size: 16px;
+        }
     </style>
 </head>
 <body>
@@ -100,51 +147,261 @@
     <h1>ЕХИДНА НАКЛЗ</h1>
     <div class="sub">дуэль: камень / ножницы / бумага</div>
 
-    <div id="statusMessage" class="status">👋 Нажмите на кнопку выбора жеста</div>
-
-    <div class="choice-buttons">
-        <button class="choice-btn rock" data-choice="rock">🪨 КАМЕНЬ</button>
-        <button class="choice-btn paper" data-choice="paper">📄 БУМАГА</button>
-        <button class="choice-btn scissors" data-choice="scissors">✂️ НОЖНИЦЫ</button>
+    <div id="roomInfo" class="room-info hidden">
+        🆔 Комната: <span id="roomIdSpan">---</span><br>
+        💰 Ставка: <span id="betSpan">0.1</span> TON<br>
+        ⚔️ Статус: <span id="statusSpan">ожидание</span>
     </div>
 
-    <div class="footer-buttons">
-        <div class="small-btn" id="profileBtn">📜 МОЙ ПРОФИЛЬ</div>
-        <div class="small-btn" id="roomsBtn">🏟️ КОМНАТЫ</div>
+    <div id="createPanel" class="room-actions">
+        <div class="action-btn" id="createRoomBtn">➕ СОЗДАТЬ КОМНАТУ (0.1 TON)</div>
     </div>
-    <div class="info-text">💎 Сражения на TON • Рейтинговые бои • NFT-награды</div>
+
+    <div id="joinPanel" class="room-actions hidden">
+        <input type="text" id="roomCodeInput" placeholder="Введите код комнаты">
+        <div class="action-btn" id="joinRoomBtn">🔗 ПРИСОЕДИНИТЬСЯ</div>
+    </div>
+
+    <div id="invitePanel" class="hidden">
+        <div class="invite-link" id="inviteLink"></div>
+        <div class="action-btn" id="copyLinkBtn">📋 КОПИРОВАТЬ ССЫЛКУ</div>
+    </div>
+
+    <div id="gamePanel" class="hidden">
+        <div id="statusMessage" class="status">⚔️ Игра началась! Выберите жест</div>
+        <div class="choice-buttons">
+            <button class="choice-btn" data-choice="rock">🪨 КАМЕНЬ</button>
+            <button class="choice-btn" data-choice="paper">📄 БУМАГА</button>
+            <button class="choice-btn" data-choice="scissors">✂️ НОЖНИЦЫ</button>
+        </div>
+    </div>
+
+    <div id="resultArea" class="result-area hidden">
+        <div class="result-text" id="resultText"></div>
+        <div class="action-btn" id="newGameBtn" style="margin-top: 15px;">🎮 НОВАЯ ИГРА</div>
+    </div>
+    
+    <div id="debugPanel" class="room-actions" style="margin-top: 20px; border-top: 1px solid #333; padding-top: 15px;">
+        <div class="action-btn" id="debugBtn" style="border-color: #444; background: #111;">🔧 ДИАГНОСТИКА</div>
+    </div>
 </div>
 
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <script>
     const tg = window.Telegram.WebApp;
     tg.expand();
+    tg.enableClosingConfirmation();
 
-    const statusDiv = document.getElementById('statusMessage');
+    // DOM элементы
+    const createPanel = document.getElementById('createPanel');
+    const joinPanel = document.getElementById('joinPanel');
+    const invitePanel = document.getElementById('invitePanel');
+    const gamePanel = document.getElementById('gamePanel');
+    const roomInfoDiv = document.getElementById('roomInfo');
+    const roomIdSpan = document.getElementById('roomIdSpan');
+    const betSpan = document.getElementById('betSpan');
+    const statusSpan = document.getElementById('statusSpan');
+    const statusMessage = document.getElementById('statusMessage');
+    const resultArea = document.getElementById('resultArea');
+    const resultText = document.getElementById('resultText');
+    const inviteLinkDiv = document.getElementById('inviteLink');
+    const roomCodeInput = document.getElementById('roomCodeInput');
+    const debugBtn = document.getElementById('debugBtn');
 
+    let currentRoomId = null;
+    let currentBet = 0.1;
+    let myChoice = null;
+
+    // Функция отправки данных боту
+    function sendToBot(action, data = {}) {
+        const message = JSON.stringify({ action, ...data });
+        console.log('📤 Отправляем боту:', message);
+        tg.sendData(message);
+        tg.showPopup({ 
+            title: '📤 Отправлено', 
+            message: `Действие: ${action}\nДанные: ${JSON.stringify(data)}`,
+            buttons: [{type: 'ok'}]
+        });
+    }
+
+    function showLoading() {
+        document.querySelectorAll('.action-btn, .choice-btn').forEach(btn => {
+            btn.classList.add('loading');
+        });
+    }
+
+    function hideLoading() {
+        document.querySelectorAll('.action-btn, .choice-btn').forEach(btn => {
+            btn.classList.remove('loading');
+        });
+    }
+
+    function resetToMainMenu() {
+        createPanel.classList.remove('hidden');
+        joinPanel.classList.remove('hidden');
+        invitePanel.classList.add('hidden');
+        gamePanel.classList.add('hidden');
+        roomInfoDiv.classList.add('hidden');
+        resultArea.classList.add('hidden');
+        currentRoomId = null;
+    }
+
+    // Диагностика
+    debugBtn.addEventListener('click', () => {
+        const debugInfo = `Telegram WebApp: ${tg.version}\nUserId: ${tg.initDataUnsafe?.user?.id || 'неизвестно'}\nPlatform: ${tg.platform}\nCurrentRoom: ${currentRoomId || 'нет'}`;
+        tg.showPopup({ title: '🔧 ДИАГНОСТИКА', message: debugInfo, buttons: [{type: 'ok'}] });
+        console.log('Диагностика:', debugInfo);
+    });
+
+    // Создание комнаты
+    document.getElementById('createRoomBtn').addEventListener('click', () => {
+        console.log('🔘 Нажата кнопка СОЗДАТЬ КОМНАТУ');
+        sendToBot('create_room', { bet: 0.1 });
+        showLoading();
+    });
+
+    // Присоединение по коду
+    document.getElementById('joinRoomBtn').addEventListener('click', () => {
+        const code = roomCodeInput.value.trim();
+        if (!code) {
+            tg.showPopup({ title: 'Ошибка', message: 'Введите код комнаты', buttons: [{type: 'ok'}] });
+            return;
+        }
+        console.log('🔘 Нажата кнопка ПРИСОЕДИНИТЬСЯ, код:', code);
+        sendToBot('join_room', { roomId: code });
+        showLoading();
+    });
+
+    // Копирование ссылки
+    document.getElementById('copyLinkBtn').addEventListener('click', () => {
+        const link = inviteLinkDiv.innerText;
+        tg.showPopup({ title: 'Ссылка скопирована', message: 'Отправьте её другу', buttons: [{type: 'ok'}] });
+    });
+
+    // Новая игра
+    document.getElementById('newGameBtn').addEventListener('click', () => {
+        resetToMainMenu();
+    });
+
+    // Выбор жеста
     document.querySelectorAll('.choice-btn').forEach(btn => {
         btn.addEventListener('click', () => {
             const choice = btn.getAttribute('data-choice');
-            tg.sendData(choice);
-            statusDiv.innerHTML = `✅ Ваш выбор: ${choice}. Ожидаем ответа бота...`;
-            tg.showPopup({
-                title: 'Выбор сделан',
-                message: `Вы выбрали ${choice}. Результат придёт в чат с ботом.`,
-                buttons: [{type: 'ok'}]
-            });
+            if (currentRoomId) {
+                console.log('🔘 Выбран жест:', choice, 'комната:', currentRoomId);
+                sendToBot('make_choice', { choice, roomId: currentRoomId });
+                statusMessage.innerHTML = `✅ Вы выбрали: ${getChoiceName(choice)}\n⏳ Ожидаем выбора соперника...`;
+            } else {
+                tg.showPopup({ title: 'Ошибка', message: 'Нет активной комнаты', buttons: [{type: 'ok'}] });
+            }
         });
     });
 
-    document.getElementById('profileBtn').addEventListener('click', () => {
-        tg.openTelegramLink('https://t.me/EkhidnaNaklzBot');
-        tg.showPopup({ title: '📜 Профиль', message: 'Переход в чат. Напишите /profile', buttons: [{type: 'ok'}] });
-    });
+    function getChoiceName(choice) {
+        const names = { rock: '🪨 КАМЕНЬ', paper: '📄 БУМАГА', scissors: '✂️ НОЖНИЦЫ' };
+        return names[choice] || choice;
+    }
 
-    document.getElementById('roomsBtn').addEventListener('click', () => {
-        tg.showPopup({ title: '🏟️ КОМНАТЫ', message: 'Список комнат и ставок появится позже', buttons: [{type: 'ok'}] });
+    // Обработка входящих данных от бота
+    tg.onEvent('web_app_data', (event) => {
+        console.log('📩 Получены данные от бота:', event.data);
+        hideLoading();
+        
+        try {
+            const data = JSON.parse(event.data);
+            console.log('📦 Распарсено:', data);
+
+            if (data.type === 'room_created') {
+                currentRoomId = data.roomId;
+                currentBet = data.betAmount;
+                roomIdSpan.innerText = currentRoomId.substring(0, 30) + '...';
+                betSpan.innerText = currentBet;
+                statusSpan.innerText = 'ожидание соперника';
+                inviteLinkDiv.innerText = `https://t.me/EkhidnaNaklzBot?startapp=${currentRoomId}`;
+                
+                createPanel.classList.add('hidden');
+                joinPanel.classList.add('hidden');
+                invitePanel.classList.remove('hidden');
+                roomInfoDiv.classList.remove('hidden');
+                tg.showPopup({ title: '✅ Комната создана', message: 'Отправьте ссылку другу', buttons: [{type: 'ok'}] });
+            }
+            
+            if (data.type === 'room_joined') {
+                currentRoomId = data.roomId;
+                currentBet = data.betAmount;
+                roomIdSpan.innerText = currentRoomId.substring(0, 30) + '...';
+                betSpan.innerText = currentBet;
+                statusSpan.innerText = 'игра началась!';
+                
+                createPanel.classList.add('hidden');
+                joinPanel.classList.add('hidden');
+                invitePanel.classList.add('hidden');
+                roomInfoDiv.classList.remove('hidden');
+                gamePanel.classList.remove('hidden');
+                statusMessage.innerHTML = '⚔️ Игра началась! Выберите жест';
+                tg.showPopup({ title: '✅ Присоединились', message: 'Игра началась!', buttons: [{type: 'ok'}] });
+            }
+            
+            if (data.type === 'game_started') {
+                createPanel.classList.add('hidden');
+                joinPanel.classList.add('hidden');
+                invitePanel.classList.add('hidden');
+                roomInfoDiv.classList.remove('hidden');
+                gamePanel.classList.remove('hidden');
+                statusSpan.innerText = 'игра началась!';
+                statusMessage.innerHTML = '⚔️ Игра началась! Выберите жест';
+            }
+            
+            if (data.type === 'choice_confirmed') {
+                statusMessage.innerHTML = `✅ Ваш выбор: ${getChoiceName(data.choice)}\n⏳ Ожидаем выбора соперника...`;
+            }
+            
+            if (data.type === 'game_result') {
+                gamePanel.classList.add('hidden');
+                resultArea.classList.remove('hidden');
+                resultText.innerHTML = data.result;
+                
+                tg.showPopup({
+                    title: '🏆 Результат игры',
+                    message: data.result,
+                    buttons: [{type: 'ok'}]
+                });
+            }
+            
+            if (data.type === 'waiting') {
+                statusMessage.innerHTML = `⏳ ${data.message}`;
+            }
+            
+            if (data.type === 'error') {
+                tg.showPopup({ title: '❌ Ошибка', message: data.message, buttons: [{type: 'ok'}] });
+            }
+            
+            if (data.type === 'room_info') {
+                if (data.roomId) {
+                    currentRoomId = data.roomId;
+                    currentBet = data.betAmount;
+                    roomIdSpan.innerText = currentRoomId.substring(0, 30) + '...';
+                    betSpan.innerText = currentBet;
+                    statusSpan.innerText = data.status;
+                    
+                    if (data.status === 'playing') {
+                        createPanel.classList.add('hidden');
+                        joinPanel.classList.add('hidden');
+                        invitePanel.classList.add('hidden');
+                        roomInfoDiv.classList.remove('hidden');
+                        gamePanel.classList.remove('hidden');
+                        statusMessage.innerHTML = '⚔️ Игра началась! Выберите жест';
+                    }
+                }
+            }
+        } catch (e) {
+            console.error('❌ Ошибка парсинга:', e);
+            tg.showPopup({ title: 'Ошибка', message: 'Неверный формат данных от бота', buttons: [{type: 'ok'}] });
+        }
     });
 
     tg.ready();
+    console.log('✅ Мини-приложение загружено, версия:', tg.version);
 </script>
 </body>
 </html>
