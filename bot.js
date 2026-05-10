@@ -20,15 +20,6 @@ function getChoiceName(choice) {
     return names[choice] || choice;
 }
 
-async function determineWinner(choice1, choice2, creatorId, opponentId) {
-    if (choice1 === choice2) return { text: `🤝 НИЧЬЯ!`, winnerId: null };
-    const winMap = { rock: 'scissors', scissors: 'paper', paper: 'rock' };
-    if (winMap[choice1] === choice2) {
-        return { text: `🥇 ПОБЕДИЛ СОЗДАТЕЛЬ КОМНАТЫ!\n${getChoiceName(choice1)} побеждает ${getChoiceName(choice2)}`, winnerId: creatorId };
-    }
-    return { text: `🥇 ПОБЕДИЛ СОПЕРНИК!\n${getChoiceName(choice2)} побеждает ${getChoiceName(choice1)}`, winnerId: opponentId };
-}
-
 // === УСТАНОВКА МЕНЮ ===
 bot.api.setMyCommands([
     { command: 'start', description: '🏠 Начать игру' },
@@ -127,7 +118,6 @@ bot.command('start', async (ctx) => {
             .update({ opponent_id: userId, status: 'playing' })
             .eq('id', room.id);
         
-        // Кнопки для присоединившегося
         await ctx.reply(`✅ **ВЫ ПРИСОЕДИНИЛИСЬ!**\n\n⚔️ Игра началась! Выберите жест:`, {
             reply_markup: {
                 inline_keyboard: [
@@ -140,7 +130,6 @@ bot.command('start', async (ctx) => {
             }
         });
         
-        // Кнопки для создателя
         await bot.api.sendMessage(room.creator_id, `🎮 **СОПЕРНИК ПРИСОЕДИНИЛСЯ!**\n\nВыберите жест:`, {
             reply_markup: {
                 inline_keyboard: [
@@ -215,26 +204,45 @@ bot.callbackQuery(/^choice_(.+)_(rock|paper|scissors)$/, async (ctx) => {
         .single();
     
     if (updated.creator_choice && updated.opponent_choice) {
-        const result = await determineWinner(
-            updated.creator_choice,
-            updated.opponent_choice,
-            updated.creator_id,
-            updated.opponent_id
-        );
+        const p1 = updated.creator_choice;
+        const p2 = updated.opponent_choice;
+        let result = '';
+        let winnerId = null;
+        
+        if (p1 === p2) {
+            result = `🤝 НИЧЬЯ!`;
+        } else if (
+            (p1 === 'rock' && p2 === 'scissors') ||
+            (p1 === 'scissors' && p2 === 'paper') ||
+            (p1 === 'paper' && p2 === 'rock')
+        ) {
+            result = `🥇 ПОБЕДИЛ СОЗДАТЕЛЬ!\n${getChoiceName(p1)} побеждает ${getChoiceName(p2)}`;
+            winnerId = updated.creator_id;
+        } else {
+            result = `🥇 ПОБЕДИЛ СОПЕРНИК!\n${getChoiceName(p2)} побеждает ${getChoiceName(p1)}`;
+            winnerId = updated.opponent_id;
+        }
         
         await supabase
             .from('rooms')
-            .update({ status: 'finished', winner_id: result.winnerId })
+            .update({ status: 'finished', winner_id: winnerId })
             .eq('id', room.id);
         
-        if (result.winnerId) {
-            const loserId = result.winnerId === updated.creator_id ? updated.opponent_id : updated.creator_id;
-            await supabase.rpc('update_player_stats', { p_winner_id: result.winnerId, p_loser_id: loserId });
+        if (winnerId) {
+            const loserId = winnerId === updated.creator_id ? updated.opponent_id : updated.creator_id;
+            await supabase
+                .from('users')
+                .update({ wins: supabase.raw('wins + 1'), xp: supabase.raw('xp + 50') })
+                .eq('id', winnerId);
+            await supabase
+                .from('users')
+                .update({ losses: supabase.raw('losses + 1'), xp: supabase.raw('xp + 10') })
+                .eq('id', loserId);
         }
         
-        await bot.api.sendMessage(updated.creator_id, `🏆 ${result.text}`);
+        await bot.api.sendMessage(updated.creator_id, `🏆 ${result}`);
         if (updated.opponent_id) {
-            await bot.api.sendMessage(updated.opponent_id, `🏆 ${result.text}`);
+            await bot.api.sendMessage(updated.opponent_id, `🏆 ${result}`);
         }
     }
 });
@@ -313,7 +321,7 @@ async function start() {
     
     await bot.api.deleteWebhook({ drop_pending_updates: true });
     await bot.api.setWebhook(`https://ekhidna-game-v1-0.onrender.com/webhook`);
-    console.log(`✅ Webhook установлен`);
+    console.log(`✅ Webhook установлен на https://ekhidna-game-v1-0.onrender.com/webhook`);
     
     app.listen(port, '0.0.0.0', () => {
         console.log(`✅ Веб-сервер на порту ${port}`);
